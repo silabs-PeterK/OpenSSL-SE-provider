@@ -1,0 +1,5 @@
+#CRC Codes for initially generated config files -- do not modify!
+emlib_core_debug_config.h=171843933
+sl_mbedtls_config.h=-909530977
+sl_psa_config.h=592955606
+sl_se_version_config.h=176583790
