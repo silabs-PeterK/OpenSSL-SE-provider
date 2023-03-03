@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-fPIC
+CFLAGS=-fPIC -g
 LDFLAGS = -shared
 
 #sudo gcc test.c -lssl -lcrypto -I
@@ -35,15 +35,17 @@ LIBS += \
 TARGET=libpsaprov.so
 SOURCES = \
 	psaprovider.c
+
 OBJECTS = \
-	libpsaprov.o
+  libpsaprov.o
+
 
 all: $(TARGET)
 	   @true
 
  $(OBJECTS) : $(SOURCES)
 	@echo "============="
-	@echo "Compiling $<"
+	@echo "Compiling $<" 
 	@$(CC) $(CFLAGS) -o  $(OBJECTS) -c  $(SOURCES) $(INCLUDES)
 
 $(TARGET): $(OBJECTS)

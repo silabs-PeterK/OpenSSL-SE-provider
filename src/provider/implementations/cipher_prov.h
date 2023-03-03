@@ -17,6 +17,7 @@
 #include <openssl/crypto.h>
 #include <openssl/core_dispatch.h>
 #include <openssl/params.h>
+#include <openssl/proverr.h>
 #include <openssl/core_names.h>
 #include "prov/ciphercommon.h"
 #include "prov/ciphercommon_aead.h"
@@ -25,42 +26,76 @@
 #include "common.h"
 #include "thread_safety.h"
 
+#define AES_BLOCK_SIZE 128
 typedef struct CIPHERstate_st {
   psa_aead_operation_t aead_operation;
   //psa_cipher_operation_t cipher_operation;
   psa_key_id_t key;
+
+  unsigned int mode;          /* The mode that we are using */
+  size_t keylen;
   size_t ivlen;
   size_t taglen;
-  uint64_t tls_enc_records;
+  size_t tls_aad_pad_sz;
+  size_t tls_aad_len;           /* TLS AAD length */
+  uint64_t tls_enc_records;     /* Number of TLS records encrypted */
 
   unsigned int iv_state;        /* set to one of IV_STATE_XXX */
-  unsigned int enc : 1;             /* Set to 1 if we are encrypting or 0 otherwise */
+  unsigned int enc : 1;         /* Set to 1 if we are encrypting or 0 otherwise */
+  unsigned int pad : 1;         /* Whether padding should be used or not */
+  unsigned int key_set : 1;     /* Set if key initialised */
+  unsigned int iv_gen_rand : 1; /* No IV was specified, so generate a rand IV */
+  unsigned int iv_gen : 1;      /* It is OK to generate IVs */
 
-  uint8_t iv[PSA_AEAD_NONCE_MAX_SIZE];
-  unsigned char buf[PSA_AEAD_NONCE_MAX_SIZE]; /* Buffer of partial blocks processed via update calls */
+  unsigned char iv[PSA_AEAD_NONCE_MAX_SIZE];   /* Buffer to use for IV's */
+  unsigned char buf[PSA_AEAD_NONCE_MAX_SIZE];   /* Buffer of partial blocks processed via update calls */
 } psa_cipher_CTX;
 
 static OSSL_FUNC_cipher_newctx_fn cipher_newctx;
 static OSSL_FUNC_cipher_freectx_fn cipher_freectx;
 static OSSL_FUNC_cipher_dupctx_fn cipher_dupctx;
+int ossl_psa_gcm_set_ctx_params(void *vctx, const OSSL_PARAM params[]);
+int ossl_psa_gcm_get_ctx_params(void *vctx, OSSL_PARAM params[]);
+int ossl_psa_gcm_cipher(void *vctx,
+                        unsigned char *out, size_t *outl, size_t outsize,
+                        const unsigned char *in, size_t inl);
+int ossl_psa_gcm_stream_update(void *vctx, unsigned char *out, size_t *outl,
+                               size_t outsize, const unsigned char *in, size_t inl);
+int ossl_psa_gcm_stream_final(void *vctx, unsigned char *out, size_t *outl,
+                              size_t outsize);
 
 extern psa_key_id_t key_id_cnt;
+
 static inline int get_next_key_id()
 {
   return key_id_cnt++;
 }
 
-static void *cipher_newctx(void *prov_ctx)
+static void * ossl_psa_gcm_initctx(size_t keybits)
 {
-  psa_cipher_CTX *ctx = ossl_prov_is_running() ? OPENSSL_zalloc(sizeof(*ctx)) : NULL;
-  ctx->key = 0;
-
-  return ctx;
+  psa_cipher_CTX *ctx;
+  if (!ossl_prov_is_running()) {
+    return NULL;
+  }
+  ctx = OPENSSL_zalloc(sizeof(*ctx));
+  if (ctx != NULL) {
+    ctx->pad = 1;
+    ctx->mode = EVP_CIPH_GCM_MODE;
+    ctx->taglen = UNINITIALISED_SIZET;
+    ctx->tls_aad_len = UNINITIALISED_SIZET;
+    ctx->ivlen = (EVP_GCM_TLS_FIXED_IV_LEN + EVP_GCM_TLS_EXPLICIT_IV_LEN);
+    ctx->keylen = keybits / 8;
+    ctx->key = 0;
+  }
+  return (void *)ctx;
 }
 
 static void cipher_freectx(void *vctx)
 {
   psa_cipher_CTX *ctx = (psa_cipher_CTX *)vctx;
+  PSA_CRYPTO_MUTEX_LOCK
+  psa_destroy_key(ctx->key);
+  PSA_CRYPTO_MUTEX_UNLOCK
   OPENSSL_clear_free(ctx, sizeof(*ctx));
 }
 
@@ -74,14 +109,16 @@ static void *cipher_dupctx(void *ctx)
   return ret;
 }
 
-static psa_status_t psa_prov_set_key(psa_key_id_t key_id, size_t key_length, psa_key_type_t type, psa_algorithm_t alg, psa_key_usage_t usage_flags, const uint8_t *data)
+static int psa_prov_set_key(psa_key_id_t key_id, size_t key_length,
+                            psa_key_type_t type, psa_algorithm_t alg,
+                            psa_key_usage_t usage_flags, const uint8_t *data)
 {
-  psa_status_t status = PSA_ERROR_GENERIC_ERROR;
   psa_key_attributes_t key_attr;
   psa_key_id_t key_id_local;
   PSA_CRYPTO_MUTEX_LOCK
     key_attr = psa_key_attributes_init();
   psa_set_key_bits(&key_attr, key_length);
+    printf("\type %i alg %i usage_flags %i\n", type, alg, usage_flags);
   psa_set_key_type(&key_attr, type);
   psa_set_key_algorithm(&key_attr, alg);
   psa_set_key_usage_flags(&key_attr, usage_flags);
@@ -91,179 +128,130 @@ static psa_status_t psa_prov_set_key(psa_key_id_t key_id, size_t key_length, psa
   //                                                                   WRAP_KEY_LOCATION));
   PSA_CRYPTO_MUTEX_UNLOCK
   psa_destroy_key(key_id);
-  TEST_RESULT_TS(psa_import_key(&key_attr, data, key_length / 8, &key_id_local), PSA_SUCCESS);
+  printf("\nCPP 4%i %i\n", key_id, key_length/8);
+  //for (size_t i = 0; i < key_length/8; i++)
+ // {
+  //   printf("\n%x\n", data[i]);
+ // }
+  printf("\nCPP 77 %i\n", psa_import_key(&key_attr, data, key_length / 8, &key_id_local));
+  //TEST_RESULT_TS(psa_import_key(&key_attr, data, key_length / 8, &key_id_local), PSA_SUCCESS);
   TEST_EQUAL(key_id_local, key_id);
+  printf("\nCPP 5\n");
   return OPENSSL_SUCCESS;
 }
 
-static int d333_set_ctx_params(void *cctx, const OSSL_PARAM params[])
-{
-  PSA_SUCCESS;
-}
-
-static int cipher_update(void *cctx,
-                         unsigned char *out, size_t *outl, size_t outsize,
-                         const unsigned char *in, size_t inl)
-{
-  psa_cipher_CTX * psactx = (psa_cipher_CTX *) cctx;
-  TEST_NOT_NULL(psactx)
-  if ((in == NULL) || (inl = 0)) {
-    TEST_RESULT_TS(psa_aead_abort(&(psactx->aead_operation)), PSA_SUCCESS);
-    return OPENSSL_SUCCESS;
-  }
-
-  if (out == NULL) {
-    TEST_RESULT_TS(psa_aead_update_ad(&(psactx->aead_operation),
-                                      (const uint8_t *) in,
-                                      inl), PSA_SUCCESS);
-  } else {
-    TEST_RESULT_TS(psa_aead_update(&(psactx->aead_operation),
-                                   (const uint8_t *) in,
-                                   inl,
-                                   (uint8_t *) out,
-                                   outsize,
-                                   outl), PSA_SUCCESS);
-  }
-  return OPENSSL_SUCCESS;
-}
-
-static int cipher_final(void *cctx,
-                        unsigned char *out, size_t *outl, size_t outsize)
-{
-  psa_cipher_CTX * psactx = (psa_cipher_CTX *) cctx;
-  if (psactx->enc) {
-    TEST_RESULT_TS(psa_aead_finish(&(psactx->aead_operation),
-                                   out,
-                                   outsize,
-                                   outl,
-                                   (uint8_t *) psactx->buf,
-                                   psactx->taglen, //in
-                                   &psactx->taglen), PSA_SUCCESS);
-  } else {
-    TEST_EQUAL(psactx->taglen, UNINITIALISED_SIZET);
-  //  TEST_RESULT_TS(
-   //   psa_aead_verify(&(psactx->aead_operation),
-     //                 uint8_t * plaintext,
-       //               size_t plaintext_size,
-         //             size_t * plaintext_length,
-           //           (const uint8_t *) psactx->buf,
-    //                  psactx->taglen), PSA_SUCCESS);
-  }
-
-  psactx->iv_state = IV_STATE_FINISHED; /* Don't reuse the IV */
-  return OPENSSL_SUCCESS;
-}
-
-# define IMPLEMENT_cipher_operation(name, keySize, mode, alg, keyType)                           \
-                                                                                                 \
-  static int name##_##keySize##_##mode##_set_ctx_params(void *cctx, const OSSL_PARAM params[])   \
-  {                                                                                              \
-    return OPENSSL_SUCCESS;                                                                      \
-  }                                                                                              \
-                                                                                                 \
-  static int name##_##keySize##_##mode##_encrypt_init(void *cctx, const unsigned char *key,      \
-                                                      size_t keylen, const unsigned char *iv,    \
-                                                      size_t ivlen, const OSSL_PARAM params[]){  \
-    psa_status_t status = PSA_ERROR_GENERIC_ERROR;                                               \
-    psa_cipher_CTX * psactx = (psa_cipher_CTX *) cctx;                                           \
-    size_t nonce_length;                                                                         \
-    if (!ossl_prov_is_running()) {                                                               \
-      return OPENSSL_FAILURE;                                                                    \
-    }                                                                                            \
-    TEST_NOT_NULL(psactx)                                                                        \
-    psactx->enc = 1;                                                                             \
-    psactx->taglen = PSA_AEAD_TAG_LENGTH(keyType, keySize, alg);                                 \
-    if (psactx->key == 0) {                                                                      \
-      TEST_NOT_NULL(key)                                                                         \
-      if (strncmp(key, "KEY_ID:", 7) == 0) {                                                     \
-        psactx->key = key[10];                                                                   \
-        psactx->key <<= 8;                                                                       \
-        psactx->key = key[9];                                                                    \
-        psactx->key <<= 8;                                                                       \
-        psactx->key = key[8];                                                                    \
-        psactx->key <<= 8;                                                                       \
-        psactx->key = key[7];                                                                    \
-      }                                                                                          \
-      else {                                                                                     \
-        psactx->key = get_next_key_id();                                                         \
-        psa_prov_set_key(psactx->key, keySize, keyType, alg, PSA_KEY_USAGE_ENCRYPT, key);        \
-      }                                                                                          \
-    }                                                                                            \
-    PSA_CRYPTO_MUTEX_LOCK                                                                        \
-    psactx->aead_operation = psa_aead_operation_init();                                          \
-    PSA_CRYPTO_MUTEX_UNLOCK                                                                      \
-    TEST_RESULT_TS(                                                                              \
-      psa_aead_encrypt_setup(&(psactx->aead_operation), psactx->key, alg),                       \
-      PSA_SUCCESS);                                                                              \
-    TEST_RESULT_TS(psa_aead_generate_nonce(&(psactx->aead_operation),                            \
-                                           psactx->iv,                                           \
-                                           PSA_AEAD_NONCE_LENGTH(keyType, alg),                  \
-                                           &psactx->ivlen),                                      \
-                   PSA_SUCCESS);                                                                 \
-    TEST_EQUAL(PSA_AEAD_NONCE_LENGTH(keyType, alg), psactx->ivlen)                               \
-    psactx->tls_enc_records = 0;                                                                 \
-    return OPENSSL_SUCCESS;                                                                      \
-  }                                                                                              \
-                                                                                                 \
-  static int name##_##keySize##_##mode##_decrypt_init(void *cctx, const unsigned char *key,      \
-                                                      size_t keylen, const unsigned char *iv,    \
-                                                      size_t ivlen, const OSSL_PARAM params[]){  \
-    psa_status_t status = PSA_ERROR_GENERIC_ERROR;                                               \
-    if (!ossl_prov_is_running()) {                                                               \
-      return OPENSSL_FAILURE;                                                                    \
-    }                                                                                            \
-    psa_cipher_CTX * psactx = (psa_cipher_CTX *) EVP_CIPHER_CTX_get_cipher_data(cctx);           \
-    if (psactx == NULL) {                                                                        \
-      psactx = OPENSSL_zalloc(sizeof(psa_cipher_CTX));                                           \
-      EVP_CIPHER_CTX_set_cipher_data(cctx, (void*)psactx);                                       \
-      psactx->key = 0;                                                                           \
-    }                                                                                            \
-                                                                                                 \
-    if (psactx->key == 0) {                                                                      \
-      if (key == NULL) {                                                                         \
-        return OPENSSL_FAILURE;                                                                  \
-      }                                                                                          \
-      psactx->key = get_next_key_id();                                                           \
-      d333_set_ctx_params(cctx, params);                                                         \
-    }                                                                                            \
-    PSA_CRYPTO_MUTEX_LOCK                                                                        \
-    psactx->aead_operation = psa_aead_operation_init();                                          \
-    PSA_CRYPTO_MUTEX_UNLOCK                                                                      \
-    TEST_RESULT_TS(                                                                              \
-      psa_aead_decrypt_setup(&(psactx->aead_operation), psactx->key, alg),                       \
-      PSA_SUCCESS);                                                                              \
-    return OPENSSL_SUCCESS;                                                                      \
-  }                                                                                              \
-                                                                                                 \
-  static int name##_##keySize##_##mode##_get_params(OSSL_PARAM params[])                         \
-  {                                                                                              \
-    OSSL_PARAM *p = NULL;                                                                        \
-    p = OSSL_PARAM_locate(params, OSSL_DIGEST_PARAM_BLOCK_SIZE);                                 \
-    if (p != NULL && !OSSL_PARAM_set_size_t(p, 64)) {                                            \
-      return OPENSSL_FAILURE;                                                                    \
-    }                                                                                            \
-    p = OSSL_PARAM_locate(params, OSSL_DIGEST_PARAM_SIZE);                                       \
-    if (p != NULL && !OSSL_PARAM_set_size_t(p, 32)) {                                            \
-      return OPENSSL_FAILURE;                                                                    \
-    }                                                                                            \
-    return OPENSSL_SUCCESS;                                                                      \
-  }                                                                                              \
-                                                                                                 \
-  const OSSL_DISPATCH ossl_##name##keySize##mode##_functions[] = {                               \
-    { OSSL_FUNC_CIPHER_NEWCTX, (void (*)(void))cipher_newctx },                                  \
-    { OSSL_FUNC_CIPHER_ENCRYPT_INIT, (void (*)(void))name##_##keySize##_##mode##_encrypt_init }, \
-    { OSSL_FUNC_CIPHER_DECRYPT_INIT, (void (*)(void))name##_##keySize##_##mode##_decrypt_init }, \
-    { OSSL_FUNC_CIPHER_UPDATE, (void (*)(void))cipher_update },                                  \
-    { OSSL_FUNC_CIPHER_FINAL, (void (*)(void))cipher_final },                                    \
-    { OSSL_FUNC_CIPHER_FREECTX, (void (*)(void))cipher_freectx },                                \
-    { OSSL_FUNC_CIPHER_DUPCTX, (void (*)(void))cipher_dupctx },                                  \
-    { OSSL_FUNC_CIPHER_SET_CTX_PARAMS, (void (*)(void))d333_set_ctx_params },                    \
-    { OSSL_FUNC_CIPHER_GET_PARAMS, (void (*)(void))name##_##keySize##_##mode##_get_params },     \
-    { 0, NULL }                                                                                  \
+# define IMPLEMENT_cipher_operation(name, keySize, mode, UCMODE, alg, keyType)                      \
+                                                                                                    \
+  static void * name##_##keySize##_##mode##_cipher_newctx(void *prov_ctx)                           \
+  {                                                                                                 \
+    return ossl_psa_gcm_initctx(keySize);                                                           \
+  }                                                                                                 \
+                                                                                                    \
+  static int name##_##keySize##_##mode##_init(void *vctx, const unsigned char *key, size_t keylen,  \
+                                              const unsigned char *iv, size_t ivlen,                \
+                                              const OSSL_PARAM params[], int enc)                   \
+  {                                                                                                 \
+    psa_cipher_CTX *ctx = (psa_cipher_CTX *)vctx;                                                   \
+                                                                                                    \
+    if (!ossl_prov_is_running()) {                                                                  \
+      return OPENSSL_FAILURE;                                                                       \
+    }                                                                                               \
+                                                                                                    \
+    ctx->enc = enc;                                                                                 \
+                                                                                                    \
+    if (iv != NULL) {                                                                               \
+      if (ivlen == 0 || ivlen > sizeof(ctx->iv)) {                                                  \
+        ERR_raise(ERR_LIB_PROV, PROV_R_INVALID_IV_LENGTH);                                          \
+        return OPENSSL_FAILURE;                                                                     \
+      }                                                                                             \
+      ctx->ivlen = ivlen;                                                                           \
+      memcpy(ctx->iv, iv, ivlen);                                                                   \
+      ctx->iv_state = IV_STATE_BUFFERED;                                                            \
+    }                                                                                               \
+                                                                                                    \
+    if (key != NULL) {                                                                              \
+      if (keylen != ctx->keylen) {                                                                  \
+        ERR_raise(ERR_LIB_PROV, PROV_R_INVALID_KEY_LENGTH);                                         \
+        return OPENSSL_FAILURE;                                                                     \
+      }                                                                                             \
+                                                                                                    \
+      if (ctx->key == 0) {                                                                          \
+        if (strncmp(key, "KEY_ID:", 7) == 0) {                                                      \
+          ctx->key = key[10];                                                                       \
+          ctx->key <<= 8;                                                                           \
+          ctx->key = key[9];                                                                        \
+          ctx->key <<= 8;                                                                           \
+          ctx->key = key[8];                                                                        \
+          ctx->key <<= 8;                                                                           \
+          ctx->key = key[7];                                                                        \
+        } else {                                                                                    \
+          ctx->key = get_next_key_id();                                                             \
+          if (enc) {                                                                                \
+            TEST_EQUAL(psa_prov_set_key(ctx->key, keySize, keyType, alg,                            \
+                                        PSA_KEY_USAGE_ENCRYPT, key), OPENSSL_SUCCESS);              \
+          } else {                                                                                  \
+            TEST_EQUAL(psa_prov_set_key(ctx->key, keySize, keyType, alg,                            \
+                                        PSA_KEY_USAGE_DECRYPT, key), OPENSSL_SUCCESS);              \
+          }                                                                                         \
+        }                                                                                           \
+        ctx->key_set = 1;                                                                           \
+      }                                                                                             \
+      ctx->tls_enc_records = 0;                                                                     \
+      PSA_CRYPTO_MUTEX_LOCK                                                                         \
+      ctx->aead_operation = psa_aead_operation_init();                                              \
+      PSA_CRYPTO_MUTEX_UNLOCK                                                                       \
+      if (enc) {                                                                                    \
+        TEST_EQUAL(psa_aead_encrypt_setup(&ctx->aead_operation, ctx->key, alg), PSA_SUCCESS);       \
+        ctx->taglen = PSA_AEAD_TAG_LENGTH(keyType, keySize, alg);                                   \
+      } else {                                                                                      \
+        TEST_EQUAL(psa_aead_decrypt_setup(&ctx->aead_operation, ctx->key, alg), PSA_SUCCESS);       \
+      }                                                                                             \
+    }                                                                                               \
+                                                                            \
+    return ossl_psa_gcm_set_ctx_params(ctx, params);                                                \
+  }                                                                                                 \
+                                                                                                    \
+  static int name##_##keySize##_##mode##_encrypt_init(void *vctx, const unsigned char *key,         \
+                                                      size_t keylen, const unsigned char *iv,       \
+                                                      size_t ivlen, const OSSL_PARAM params[]){     \
+    return name##_##keySize##_##mode##_init(vctx, key, keylen, iv, ivlen, params, 1);               \
+  }                                                                                                 \
+                                                                                                    \
+  static int name##_##keySize##_##mode##_decrypt_init(void *vctx, const unsigned char *key,         \
+                                                      size_t keylen, const unsigned char *iv,       \
+                                                      size_t ivlen, const OSSL_PARAM params[]){     \
+    return name##_##keySize##_##mode##_init(vctx, key, keylen, iv, ivlen, params, 0);               \
+  }                                                                                                 \
+                                                                                                    \
+  static int name##_##keySize##_##mode##_get_params(OSSL_PARAM params[])                            \
+  {                                                                                                 \
+    return ossl_cipher_generic_get_params(params, EVP_CIPH_##UCMODE##_MODE,                         \
+                                          AEAD_FLAGS, keySize,                                      \
+                                          AES_BLOCK_SIZE, PSA_AEAD_NONCE_LENGTH(keyType, alg));     \
+  }                                                                                                 \
+                                                                                                    \
+  const OSSL_DISPATCH ossl_##name##keySize##mode##_functions[] = {                                  \
+    { OSSL_FUNC_CIPHER_NEWCTX, (void (*)(void))name##_##keySize##_##mode##_cipher_newctx },         \
+    { OSSL_FUNC_CIPHER_ENCRYPT_INIT, (void (*)(void))name##_##keySize##_##mode##_encrypt_init },    \
+    { OSSL_FUNC_CIPHER_DECRYPT_INIT, (void (*)(void))name##_##keySize##_##mode##_decrypt_init },    \
+    { OSSL_FUNC_CIPHER_UPDATE, (void (*)(void))ossl_psa_gcm_stream_update },                        \
+    { OSSL_FUNC_CIPHER_FINAL, (void (*)(void))ossl_psa_gcm_stream_final },                          \
+    { OSSL_FUNC_CIPHER_CIPHER, (void (*)(void))ossl_psa_gcm_cipher },                               \
+    { OSSL_FUNC_CIPHER_FREECTX, (void (*)(void))cipher_freectx },                                   \
+    { OSSL_FUNC_CIPHER_DUPCTX, (void (*)(void))cipher_dupctx },                                     \
+    { OSSL_FUNC_CIPHER_GET_PARAMS, (void (*)(void))name##_##keySize##_##mode##_get_params },        \
+    { OSSL_FUNC_CIPHER_GETTABLE_PARAMS, (void (*)(void))ossl_cipher_generic_gettable_params },      \
+    { OSSL_FUNC_CIPHER_GETTABLE_CTX_PARAMS, (void (*)(void))ossl_cipher_aead_gettable_ctx_params }, \
+    { OSSL_FUNC_CIPHER_SETTABLE_CTX_PARAMS, (void (*)(void))ossl_cipher_aead_settable_ctx_params }, \
+    { OSSL_FUNC_CIPHER_SET_CTX_PARAMS, (void (*)(void))ossl_psa_gcm_set_ctx_params },               \
+    { OSSL_FUNC_CIPHER_GET_CTX_PARAMS, (void (*)(void))ossl_psa_gcm_get_ctx_params },               \
+    { 0, NULL }                                                                                     \
   };
 
-IMPLEMENT_cipher_operation(aes, 256, gcm, PSA_ALG_GCM, PSA_KEY_TYPE_AES)
-IMPLEMENT_cipher_operation(aes, 256, ccm, PSA_ALG_CCM, PSA_KEY_TYPE_AES)
+IMPLEMENT_cipher_operation(aes, 256, gcm, GCM, PSA_ALG_GCM, PSA_KEY_TYPE_AES)
+IMPLEMENT_cipher_operation(aes, 192, gcm, GCM, PSA_ALG_GCM, PSA_KEY_TYPE_AES)
+IMPLEMENT_cipher_operation(aes, 128, gcm, GCM, PSA_ALG_GCM, PSA_KEY_TYPE_AES)
+//IMPLEMENT_cipher_operation(aes, 256, ccm, PSA_ALG_CCM, PSA_KEY_TYPE_AES)
 /*
    ossl_aes256gcm_functions),
    ossl_aes192gcm_functions),

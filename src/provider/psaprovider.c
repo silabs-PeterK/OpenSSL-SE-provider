@@ -22,6 +22,7 @@
 #include "common.h"
 #include "implementations/hash_prov.h"
 #include "implementations/cipher_prov.h"
+#include "implementations/ciphercommon_gcm_local.c"
 
 //required for cpc
 #include "sl_cpc_se_primary.h"
