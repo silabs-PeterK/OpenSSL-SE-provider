@@ -4,7 +4,7 @@ LDFLAGS = -shared
 
 #sudo gcc test.c -lssl -lcrypto -I
 
-SDK_PATH ?= ../../artifact/gecko_sdk_4.2.0
+SDK_PATH ?= $(GSDK_REPO)
 OPENSSLDIR= /usr/local/src/openssl-3.0.7
 #OPENSSLDIR= /home/peter/openssl-3.0.8
 LIBSDIR= /usr/lib/
@@ -26,7 +26,7 @@ INCLUDES += \
   -I $(SDK_PATH)/platform/emlib/host/inc 
 
 LIBS += \
-  ../../artifact/build/debug/primary.a \
+  $(SDK_PATH)/platform/security/sl_component/sl_secure_engine_cpc/build/debug/primary_psa_lib.a \
   $(OPENSSLDIR)/providers/libcommon.a \
   -lcrypto \
   -lssl \
