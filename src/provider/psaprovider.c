@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2022 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2023 Silicon Labs. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -30,18 +30,21 @@
 #include <signal.h>
 #include <unistd.h>
 
+#define CPC_INSTANCE "cpcd_0"
+#define SL_VAULT_HIGH
+
 #include <pthread.h>
 
 // set this to 1 for more runtime log messages
-#define DEBUG (1)
+#define DEBUG (1) //TODO disable
 #define RETRY_COUNT (20u)
 
+// TODO: this shall be moved to provider context.
 static cpc_handle_t lib_handle;
 static bool run = true;
 static char cpc_instance[100u];
-
 pthread_mutex_t psa_crypto_mutex;
-psa_key_id_t key_id_cnt;
+psa_key_id_t key_id_cnt; //simple mechanism that can be replaced by cache
 
 static void signal_handler(int sig)
 {
@@ -53,7 +56,7 @@ static void call_cpc_init(void)
 {
   int ret;
   uint8_t retry = 0;
-  strcpy(cpc_instance, "cpcd_0");
+  strcpy(cpc_instance, CPC_INSTANCE);
 
   // Set up custom signal handler for user interrupt and termination request.
   signal(SIGINT, signal_handler);
@@ -90,8 +93,6 @@ static OSSL_FUNC_provider_get_params_fn psa_get_params;
 static OSSL_FUNC_provider_query_operation_fn psa_query;
 
 #define ALG(NAMES, FUNC) { NAMES, "provider=psa", FUNC }
-
-///TEST
 
 /* Parameters we provide to the core */
 static const OSSL_PARAM psa_param_types[] = {
@@ -138,8 +139,8 @@ static const OSSL_ALGORITHM psa_keymng[] = {
 };
 static const OSSL_ALGORITHM psa_ciphers[] = {
   ALG(PROV_NAMES_AES_256_GCM, ossl_aes256gcm_functions),
-  // ALG(PROV_NAMES_AES_192_GCM, ossl_aes192gcm_functions),
-  // ALG(PROV_NAMES_AES_128_GCM, ossl_aes128gcm_functions),
+  ALG(PROV_NAMES_AES_192_GCM, ossl_aes192gcm_functions),
+  ALG(PROV_NAMES_AES_128_GCM, ossl_aes128gcm_functions),
   // ALG(PROV_NAMES_AES_256_CCM, ossl_aes256ccm_functions),
 //  ALG(PROV_NAMES_AES_192_CCM, ossl_aes192ccm_functions),
 //  ALG(PROV_NAMES_AES_128_CCM, ossl_aes128ccm_functions),
@@ -149,8 +150,10 @@ static const OSSL_ALGORITHM psa_ciphers[] = {
 static const OSSL_ALGORITHM psa_digests[] = {
   ALG(PROV_NAMES_SHA2_224, ossl_sha224_functions),
   ALG(PROV_NAMES_SHA2_256, ossl_sha256_functions),
-  ALG(PROV_NAMES_SHA2_384, ossl_sha384_functions),
+  #ifdef SL_VAULT_HIGH
+  ALG(PROV_NAMES_SHA2_384, ossl_sha384_functions), 
   ALG(PROV_NAMES_SHA2_512, ossl_sha512_functions),
+  #endif
   { NULL, NULL, NULL }
 };
 static const OSSL_ALGORITHM *psa_query(void *provctx, int operation_id,
@@ -204,7 +207,6 @@ OPENSSL_EXPORT int OSSL_provider_init(const OSSL_CORE_HANDLE *handle,
 
   call_cpc_init();
   psa_status_t status = psa_crypto_init();
-  printf("Init status code: %" PRId32 "\n", status);
   *provctx = (void *)handle;
   *out = psa_dispatch_table;
   key_id_cnt = 1;

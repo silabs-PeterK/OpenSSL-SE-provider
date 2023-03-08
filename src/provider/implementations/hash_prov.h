@@ -25,9 +25,9 @@
 
 extern  pthread_mutex_t psa_crypto_mutex;
 
-typedef struct HASHstate_st {
+typedef struct {
   psa_hash_operation_t operation;
-} psa_hash_CTX;
+} PSA_HASH_CTX;
 
 # define IMPLEMENT_hashing_operation(name, alg)                                                                                     \
   static OSSL_FUNC_digest_newctx_fn name##_newctx;                                                                                  \
@@ -36,26 +36,26 @@ typedef struct HASHstate_st {
                                                                                                                                     \
   static void *name##_newctx(void *prov_ctx)                                                                                        \
   {                                                                                                                                 \
-    psa_hash_CTX *ctx = ossl_prov_is_running() ? OPENSSL_zalloc(sizeof(*ctx)) : NULL;                                               \
+    PSA_HASH_CTX *ctx = ossl_prov_is_running() ? OPENSSL_zalloc(sizeof(*ctx)) : NULL;                                               \
     return ctx;                                                                                                                     \
   }                                                                                                                                 \
                                                                                                                                     \
   static void name##_freectx(void *vctx)                                                                                            \
   {                                                                                                                                 \
-    psa_hash_CTX *ctx = (psa_hash_CTX *)vctx;                                                                                       \
+    PSA_HASH_CTX *ctx = (PSA_HASH_CTX *)vctx;                                                                                       \
     OPENSSL_clear_free(ctx, sizeof(*ctx));                                                                                          \
   }                                                                                                                                 \
                                                                                                                                     \
   static void *name##_dupctx(void *ctx)                                                                                             \
   {                                                                                                                                 \
-    psa_hash_CTX *in = (psa_hash_CTX *)ctx;                                                                                         \
-    psa_hash_CTX *ret = ossl_prov_is_running() ? OPENSSL_malloc(sizeof(*ret)) : NULL;                                               \
+    PSA_HASH_CTX *in = (PSA_HASH_CTX *)ctx;                                                                                         \
+    PSA_HASH_CTX *ret = ossl_prov_is_running() ? OPENSSL_malloc(sizeof(*ret)) : NULL;                                               \
     if (ret != NULL) {                                                                                                              \
       *ret = *in; }                                                                                                                 \
     return ret;                                                                                                                     \
   }                                                                                                                                 \
                                                                                                                                     \
-  static int name##_Init(psa_hash_CTX * c, ossl_unused const OSSL_PARAM params[])                                                   \
+  static int name##_Init(PSA_HASH_CTX * c, ossl_unused const OSSL_PARAM params[])                                                   \
   {                                                                                                                                 \
     if (!ossl_prov_is_running()) {                                                                                                  \
       return OPENSSL_FAILURE; }                                                                                                     \
@@ -67,7 +67,7 @@ typedef struct HASHstate_st {
     return (status == PSA_SUCCESS);                                                                                                 \
   }                                                                                                                                 \
                                                                                                                                     \
-  static int name##_Update(psa_hash_CTX * c, const void *data, size_t len)                                                          \
+  static int name##_Update(PSA_HASH_CTX * c, const void *data, size_t len)                                                          \
   {                                                                                                                                 \
     psa_status_t status = PSA_ERROR_GENERIC_ERROR;                                                                                  \
     PSA_CRYPTO_MUTEX_LOCK                                                                                                           \
@@ -76,7 +76,7 @@ typedef struct HASHstate_st {
     return (status == PSA_SUCCESS);                                                                                                 \
   }                                                                                                                                 \
                                                                                                                                     \
-  static int name##_Final(psa_hash_CTX * c, void * out, size_t * outl, size_t outsz)                                                \
+  static int name##_Final(PSA_HASH_CTX * c, void * out, size_t * outl, size_t outsz)                                                \
   {                                                                                                                                 \
     psa_status_t status = PSA_ERROR_GENERIC_ERROR;                                                                                  \
     PSA_CRYPTO_MUTEX_LOCK                                                                                                           \

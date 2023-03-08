@@ -65,7 +65,7 @@ typedef struct psa_cipher_ctx_st psa_cipher_CTX;
                                                                             WRAP_KEY_LOCATION));                      \
         TEST_EQUAL(                                                                                                   \
           psa_import_key(&attributes, (const uint8_t *) ptr, (size_t) arg, &(psactx->key)),                           \
-          PSA_SUCCESS);                                                                                               \
+          PSA_SUCCESS, 0);                                                                                            \
         break;                                                                                                        \
       }                                                                                                               \
       case EVP_CTRL_EXPORT_KEY:                                                                                       \
@@ -73,8 +73,8 @@ typedef struct psa_cipher_ctx_st psa_cipher_CTX;
         size_t data_size;                                                                                             \
         TEST_EQUAL(                                                                                                   \
           psa_export_key(psactx->key, (uint8_t *) ptr, (size_t) arg, &data_size),                                     \
-          PSA_SUCCESS);                                                                                               \
-        TEST_EQUAL(arg, data_size);                                                                                   \
+          PSA_SUCCESS, 0);                                                                                            \
+        TEST_EQUAL(arg, data_size, 0);                                                                                \
         break;                                                                                                        \
       }                                                                                                               \
       default:                                                                                                        \
@@ -99,13 +99,13 @@ typedef struct psa_cipher_ctx_st psa_cipher_CTX;
     switch (enc) {                                                                                                    \
       case 1:                                                                                                         \
         TEST_EQUAL(                                                                                                   \
-          psa_cipher_encrypt_setup(&(psactx->operation), psactx->key, PSAAlg),                                        \
-          PSA_SUCCESS);                                                                                               \
+          psa_cipher_encrypt_setup(&(psactx->operation), psactx->key, PSAAlg),                                     \
+          PSA_SUCCESS, 0);                                                                                               \
         break;                                                                                                        \
       case 0:                                                                                                         \
         TEST_EQUAL(                                                                                                   \
-          psa_cipher_decrypt_setup(&(psactx->operation), psactx->key, PSAAlg),                                        \
-          PSA_SUCCESS);                                                                                               \
+          psa_cipher_decrypt_setup(&(psactx->operation), psactx->key, PSAAlg),                                     \
+          PSA_SUCCESS, 0);                                                                                               \
         break;                                                                                                        \
       default:                                                                                                        \
         return OPENSSL_FAILURE;                                                                                       \
@@ -113,8 +113,8 @@ typedef struct psa_cipher_ctx_st psa_cipher_CTX;
     }                                                                                                                 \
     TEST_EQUAL(                                                                                                       \
       psa_cipher_set_iv(&psactx->operation, (const uint8_t *) iv,                                                     \
-                        PSA_CIPHER_IV_LENGTH(PSAKeyType, PSAAlg) ),                                                   \
-      PSA_SUCCESS)                                                                                                    \
+                        PSA_CIPHER_IV_LENGTH(PSAKeyType, PSAAlg)),                                                 \
+      PSA_SUCCESS, 0)                                                                                                    \
     return OPENSSL_SUCCESS;                                                                                           \
   }                                                                                                                   \
                                                                                                                       \
@@ -125,11 +125,10 @@ typedef struct psa_cipher_ctx_st psa_cipher_CTX;
     psa_cipher_CTX * psactx;                                                                                          \
     psa_status_t status = PSA_ERROR_GENERIC_ERROR;                                                                    \
     psactx = (psa_cipher_CTX *) EVP_CIPHER_CTX_get_cipher_data(ctx);                                                  \
-    TEST_NOT_NULL(psactx)                                                                                             \
                                                                                                                       \
     if ((in == NULL) || (inl = 0)) {                                                                                  \
       status = psa_cipher_abort(&(psactx->operation));                                                                \
-      TEST_EQUAL(status, PSA_SUCCESS)                                                                                 \
+      TEST_EQUAL(status, PSA_SUCCESS, 0)                                                                                 \
       return OPENSSL_SUCCESS;                                                                                         \
     }                                                                                                                 \
                                                                                                                       \
@@ -140,8 +139,8 @@ typedef struct psa_cipher_ctx_st psa_cipher_CTX;
                                (uint8_t *) out,                                                                       \
                                blockSize,                                                                             \
                                &output_length);                                                                       \
-    TEST_EQUAL(blockSize, output_length)                                                                              \
-    TEST_EQUAL(status, PSA_SUCCESS)                                                                                   \
+    TEST_EQUAL(blockSize, output_length, 0)                                                                           \
+    TEST_EQUAL(status, PSA_SUCCESS, 0)                                                                                \
     return OPENSSL_SUCCESS;                                                                                           \
   }                                                                                                                   \
                                                                                                                       \

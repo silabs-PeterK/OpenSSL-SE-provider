@@ -1,3 +1,7 @@
+//TODO - work just started, needed for ecdsa.
+
+
+
 /*
  * Copyright 2019-2021 The OpenSSL Project Authors. All Rights Reserved.
  *
@@ -97,84 +101,5 @@ static int psaprov_key_export(void *keydata, int selection,
 
 typedef struct HASHstate_st {
   psa_hash_operation_t * operation;
-} psa_hash_CTX;
+} PSA_HASH_CTX;
 
-# define IMPLEMENT_hashing_operation(name, alg)                                       \
-  static OSSL_FUNC_digest_newctx_fn name##_newctx;                                    \
-  static OSSL_FUNC_digest_freectx_fn name##_freectx;                                  \
-  static OSSL_FUNC_digest_dupctx_fn name##_dupctx;                                    \
-                                                                                      \
-  static void *name##_newctx(void *prov_ctx)                                          \
-  {                                                                                   \
-    psa_hash_CTX *ctx = ossl_prov_is_running() ? OPENSSL_zalloc(sizeof(*ctx)) : NULL; \
-    return ctx;                                                                       \
-  }                                                                                   \
-                                                                                      \
-  static void name##_freectx(void *vctx)                                              \
-  {                                                                                   \
-    psa_hash_CTX *ctx = (psa_hash_CTX *)vctx;                                         \
-    OPENSSL_clear_free(ctx, sizeof(*ctx));                                            \
-  }                                                                                   \
-                                                                                      \
-  static void *name##_dupctx(void *ctx)                                               \
-  {                                                                                   \
-    psa_hash_CTX *in = (psa_hash_CTX *)ctx;                                           \
-    psa_hash_CTX *ret = ossl_prov_is_running() ? OPENSSL_malloc(sizeof(*ret)) : NULL; \
-    if (ret != NULL) {                                                                \
-      *ret = *in; }                                                                   \
-    return ret;                                                                       \
-  }                                                                                   \
-                                                                                      \
-  static int name##_Init(psa_hash_CTX * c, ossl_unused const OSSL_PARAM params[])     \
-  {                                                                                   \
-    if (!ossl_prov_is_running()) {                                                    \
-      return 0; }                                                                     \
-    psa_status_t status = PSA_ERROR_GENERIC_ERROR;                                    \
-    status = psa_hash_setup(c->operation, alg);                                       \
-    return (status == PSA_SUCCESS);                                                   \
-  }                                                                                   \
-                                                                                      \
-  static int name##_Update(psa_hash_CTX * c, const void *data, size_t len)            \
-  {                                                                                   \
-    psa_status_t status = PSA_ERROR_GENERIC_ERROR;                                    \
-    status = psa_hash_update(c->operation, (const uint8_t *) data, len);              \
-    return (status == PSA_SUCCESS);                                                   \
-  }                                                                                   \
-                                                                                      \
-  static int name##_Final(unsigned char *md, psa_hash_CTX * c)                        \
-  {                                                                                   \
-    psa_status_t status = PSA_ERROR_GENERIC_ERROR;                                    \
-    size_t hash_length;                                                               \
-    status = psa_hash_finish(c->operation, (uint8_t *) md, PSA_HASH_LENGTH            \
-                               (alg), &hash_length);                                  \
-    if (PSA_HASH_LENGTH(alg) != hash_length) {                                        \
-      return -1; }                                                                    \
-    return (status == PSA_SUCCESS);                                                   \
-  }                                                                                   \
-                                                                                      \
-                                                                                      \
-  static int name##_get_params(OSSL_PARAM params[])                                   \
-  {                                                                                   \
-    OSSL_PARAM *p = NULL;                                                             \
-    p = OSSL_PARAM_locate(params, OSSL_DIGEST_PARAM_BLOCK_SIZE);                      \
-    if (p != NULL && !OSSL_PARAM_set_size_t(p, 1)) {                                  \
-      return 0; }                                                                     \
-    p = OSSL_PARAM_locate(params, OSSL_DIGEST_PARAM_SIZE);                            \
-    if (p != NULL && !OSSL_PARAM_set_size_t(p, 1)) {                                  \
-      return 0; }                                                                     \
-    return 1;                                                                         \
-  }                                                                                   \
-                                                                                      \
-  const OSSL_DISPATCH ossl_##name##_functions[] = {                                   \
-    { OSSL_FUNC_DIGEST_NEWCTX, (void (*)(void))name##_newctx },                       \
-    { OSSL_FUNC_DIGEST_INIT, (void (*)(void))name##_Init },                           \
-    { OSSL_FUNC_DIGEST_UPDATE, (void (*)(void))name##_Update },                       \
-    { OSSL_FUNC_DIGEST_FINAL, (void (*)(void))name##_Final },                         \
-    { OSSL_FUNC_DIGEST_FREECTX, (void (*)(void))name##_freectx },                     \
-    { OSSL_FUNC_DIGEST_DUPCTX, (void (*)(void))name##_dupctx },                       \
-    { OSSL_FUNC_DIGEST_GET_PARAMS, (void (*)(void))name##_get_params },               \
-    { 0, NULL }                                                                       \
-  };
-
-IMPLEMENT_hashing_operation(sha256, PSA_ALG_SHA_256)
-IMPLEMENT_hashing_operation(sha384, PSA_ALG_SHA_384)

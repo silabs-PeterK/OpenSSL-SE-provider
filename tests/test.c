@@ -1,5 +1,9 @@
 //
-// Created by pespacek on 23.01.2023.
+// Created by pespacek on 23.01.2023. This is not a full test, and definitly not production quality, it is just for developing purposes.
+// For full test, use openssl test suite with custom config file.
+// e.g.
+// OPENSSL_CONF=/usr/local/ssl/openssl.cnf ../util/shlib_wrap.sh ./sha_test
+// OPENSSL_CONF=/usr/local/ssl/openssl.cnf ../util/shlib_wrap.sh ./aesgcmtest
 //
 
 #include <stdio.h>
@@ -28,7 +32,12 @@
 
 #define TEST_true(a) (a == 1)
 #define TEST_int_eq(a, b) (a == b)
-#define TEST_mem_eq(a, m, b, n) a[m - 1] == b[n - 1]
+#define TEST_mem_eq(a, m, b, n) a[m - 1] == b[n - 1] //not proper mem eq.
+
+#define TEST_NOT_NULL(a)    \
+  if (a == NULL) {          \
+    return OPENSSL_FAILURE; \
+  }
 
 struct timeval begin, end;
 
@@ -99,7 +108,7 @@ int test_psa_crypto_hash_multi()
   printf("_____________________________ \n");
   printf("test_psa_crypto_hash_multi: \n");
   psa_status_t status;
-  char mess1[] = "Test Message Test Message Test Message Test Message Test Message Test Message Test Message Test Message Test Message Test Message\n";
+  char mess1[] = "Test Message\n";
   char mess2[] = "Hello World\n";
   unsigned char md_value[EVP_MAX_MD_SIZE];
   int md_len;
@@ -156,7 +165,7 @@ static int do_encrypt(unsigned char *iv_gen, unsigned char *ct, int *ct_len,
   ctx = EVP_CIPHER_CTX_new();
   ret = TEST_true(EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL) > 0)
         && TEST_true(EVP_EncryptInit_ex(ctx, NULL, NULL, gcm_key,
-                                     iv_gen != NULL ? NULL : gcm_iv) > 0)
+                                        iv_gen != NULL ? NULL : gcm_iv) > 0)
         && TEST_true(EVP_EncryptUpdate(ctx, NULL, &outlen, gcm_aad,
                                        sizeof(gcm_aad)) > 0)
         && TEST_true(EVP_EncryptUpdate(ctx, ct, ct_len, gcm_pt,
@@ -235,84 +244,6 @@ int test_provider_hash_multi()
   EVP_cleanup();
 }
 
-int test_provider_cipher_multi()
-{
-  printf("_____________________________ \n");
-  printf("test_provider_cipher_multi: \n");
-
-  int ret = -3;
-  EVP_CIPHER *cipher = NULL;
-  int cipher_len;
-  cipher = EVP_CIPHER_fetch(NULL, "AES-256-GCM", NULL);
-  TEST_NOT_NULL(cipher)
-
-  // Key to use for encrpytion and decryption
-  unsigned char key[32];
-  for (int i = 0; i < 32; i++) {
-    key[i] = 'k';
-  }
-
-  char mess1[] = "Test Message 01\n";
-  unsigned char ciphertext_value[EVP_MAX_BLOCK_LENGTH];
-  unsigned char plaintext_value[EVP_MAX_BLOCK_LENGTH];
-  unsigned char IV_value[EVP_MAX_BLOCK_LENGTH];
-  EVP_CIPHER_CTX *cctx = NULL;
-
-  cctx = EVP_CIPHER_CTX_new();
-  TEST_NOT_NULL(cctx);
-
-  ret = EVP_EncryptInit(cctx, cipher, gcm_key, NULL);
-  printf("EVP_EncryptInit status code: %i\n", ret);
-  ret = EVP_EncryptUpdate(cctx, ciphertext_value, &cipher_len, mess1, 16);
-  printf("EVP_EncryptUpdate update status code: %i\n Len %i\n", ret, cipher_len);
-
-  printf("Resulting ct: ");
-  for (int i = 0; i < cipher_len; i++) {
-    printf("%02x", ciphertext_value[i]);
-  }
-  ret = EVP_EncryptFinal(cctx, ciphertext_value, &cipher_len);
-  printf("EVP_EncryptFinal status code: %i\n Len %i\n", ret, cipher_len);
-
-  ret = EVP_CIPHER_CTX_ctrl(cctx, EVP_CTRL_AEAD_GET_TAG, 16, ciphertext_value + 16);
-  printf("EVP_CIPHER_CTX_ctrl status code: %i\n", ret);
-  printf("Resulting tag: ");
-  for (int i = 16; i < 32; i++) {
-    printf("%02x", ciphertext_value[i]);
-  }
-  printf("\n");
-
-  ret = EVP_CIPHER_CTX_get_original_iv(cctx, IV_value, 12);
-  printf("EVP_CIPHER_CTX_ctrl status code: %i\n", ret);
-
-  EVP_CIPHER_CTX_free(cctx);
-  cctx = EVP_CIPHER_CTX_new();
-
-  ret = EVP_DecryptInit(cctx, cipher, gcm_key, IV_value);
-  printf("EVP_DecryptInit status code: %i\n", ret);
-
-  ret = EVP_CIPHER_CTX_ctrl(cctx, EVP_CTRL_AEAD_SET_TAG, 16, ciphertext_value + 16);
-  printf("EVP_CIPHER_CTX_ctrl status code: %i\n", ret);
-
-  ret = EVP_DecryptUpdate(cctx, plaintext_value, &cipher_len, ciphertext_value, 16);
-  printf("EVP_DecryptUpdate status code: %i\n", ret);
-  printf("Resulting pt: ");
-  for (int i = 0; i < cipher_len; i++) {
-    printf("%02x", plaintext_value[i]);
-  }
-  ret = EVP_DecryptFinal(cctx, plaintext_value, &cipher_len);
-  printf("EVP_DecryptFinal status code: %i\n Len %i\n", ret, cipher_len);
-  printf("Resulting tag: ");
-  for (int i = 16; i < 32; i++) {
-    printf("%02x", ciphertext_value[i]);
-  }
-
-  EVP_CIPHER_CTX_free(cctx);
-
-/* Call this once before exit. */
-  EVP_CIPHER_free(cipher);
-  EVP_cleanup();
-}
-
 int test_provider()
 {
   OSSL_PROVIDER *prov = NULL;
@@ -322,9 +253,6 @@ int test_provider()
   //Get hash result from OpenSSL default provider
   test_provider_hash_single();
   test_provider_hash_multi();
-
-  //Get cipher result from OpenSSL default provider
-  test_provider_cipher_multi();
 
   //Load PSA proovider
   OSSL_PROVIDER_unload(prov);
@@ -347,17 +275,30 @@ int test_provider()
   // CIPHER FUNCTIONS
   //.................................................
 
+  psa_key_attributes_t key_attr;
+  psa_key_id_t import_key_id;
+  psa_status_t ret;
+   uint8_t aes_key[32] = {0};
+  key_attr = psa_key_attributes_init();
+  psa_set_key_type(&key_attr, PSA_KEY_TYPE_AES);
+  psa_set_key_bits(&key_attr, 256);
+  psa_set_key_usage_flags(&key_attr, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
+  psa_set_key_algorithm(&key_attr, PSA_ALG_GCM);
+  psa_set_key_lifetime(&key_attr, PSA_KEY_LIFETIME_FROM_PERSISTENCE_AND_LOCATION(PSA_KEY_PERSISTENCE_VOLATILE, PSA_KEY_LOCATION_SL_SE_OPAQUE));
+  psa_set_key_id(&key_attr, 0x12);
+  ret = psa_destroy_key(0x12);
+  ret = psa_import_key(&key_attr, aes_key, 32, &import_key_id);
+
+  printf("\n%i, %i\n", ret, import_key_id);
+
   unsigned char tag[32];
   unsigned char ct[32];
   int ctlen = 0, taglen = 0;
 
-  printf("%i", (do_encrypt(NULL, ct, &ctlen, tag, &taglen)
-                && TEST_mem_eq(gcm_ct, sizeof(gcm_ct), ct, ctlen)
-                && TEST_mem_eq(gcm_tag, sizeof(gcm_tag), tag, taglen)
-                && do_decrypt(gcm_iv, ct, ctlen, tag, taglen)));
-
-  //Get cipher result from without from PSA crypto provider, via OpenSSL API
-  // test_provider_cipher_multi();
+  printf("\n%i\n", (do_encrypt(NULL, ct, &ctlen, tag, &taglen)
+                    && TEST_mem_eq(gcm_ct, sizeof(gcm_ct), ct, ctlen)
+                    && TEST_mem_eq(gcm_tag, sizeof(gcm_tag), tag, taglen)
+                    && do_decrypt(gcm_iv, ct, ctlen, tag, taglen)));
 
   OSSL_PROVIDER_unload(prov);
   return OPENSSL_SUCCESS;
@@ -383,13 +324,9 @@ int test_engine()
 
   int ret = OPENSSL_FAILURE;
 
-  //OPENSSL_add_all_algorithms_conf();
-
   EVP_CIPHER *ciph;
   ciph = (EVP_CIPHER *)EVP_get_cipherbynid(NID_aes_128_cbc);
   TEST_NOT_NULL(ciph)
-  //ciph = EVP_CIPHER_fetch(NULL, NID_aes_128_cbc, NULL);
-  //TEST_NOT_NULL(ciph)
 
   unsigned char pt[16];
   for (int i = 0; i < 16; i++) {
@@ -410,15 +347,7 @@ int test_engine()
     iv[i] = 'i';
   }
 
-  /* Generate cryptographically strong pseudo-random bytes for key and IV */
-  // if (!RAND_bytes(iv, sizeof(iv)))  {
-  //     /* OpenSSL reports a failure, act accordingly */
-  //     fprintf(stderr, "ERROR: RAND_bytes iv error: %s\n", strerror(ERR_get_error() ));
-  //     return ERR_get_error() ;
-  // }
-
   OSSL_PARAM params[] = { OSSL_PARAM_END, OSSL_PARAM_END };
-  // params[0] = OSSL_PARAM_construct_size_t("key-mesh", &v);
 
   int outlen;
   EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
