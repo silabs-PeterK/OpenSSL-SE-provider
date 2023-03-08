@@ -1,10 +1,12 @@
-#ifndef SLI_PSA_CONFIG_H
-#define SLI_PSA_CONFIG_H
+#ifndef SL_PSA_CONFIG_H
+#define SL_PSA_CONFIG_H
 
 // -----------------------------------------------------------------------------
 // User exposed config options
 
 // <<< Use Configuration Wizard in Context Menu >>>
+
+// <h> Key management configuration
 
 // <o SL_PSA_KEY_USER_SLOT_COUNT> PSA User Maximum Open Keys Count <0-128>
 // <i> Maximum amount of keys that the user application will have open
@@ -53,8 +55,8 @@
 // <i> might have keys (or other files) stored in V1 format.
 // <i> If no v1 files are used, its support can be disabled for space
 // <i> optimization.
-// <i> Default: 1
-#define SL_PSA_ITS_SUPPORT_V1_DRIVER 1
+// <i> Default: 0
+#define SL_PSA_ITS_SUPPORT_V1_DRIVER 0
 
 // <o SL_PSA_ITS_SUPPORT_V2_DRIVER> Enable V2 ITS Driver Support <0-1>
 // <i> Devices that have used GSDK 4.1.x and earlier, and used ITS have the keys
@@ -66,8 +68,8 @@
 // <i> V1 ITS driver support can be disabled if the device has never used ITS
 // <i> driver before in GSDK 4.1.x and earlier, or the keys has been already
 // <i> migrated.
-// <i> Default: 1
-#define SL_PSA_ITS_SUPPORT_V2_DRIVER 1
+// <i> Default: 0
+#define SL_PSA_ITS_SUPPORT_V2_DRIVER 0
 
 // <o SL_PSA_ITS_SUPPORT_V3_DRIVER> Enable support for V3 ITS Driver <0-1>
 // <i> Devices that have used GSDK 4.1.x and earlier, and used ITS have the keys
@@ -81,15 +83,15 @@
 // <i> the value of SL_PSA_ITS_USER_MAX_FILES. If the change of
 // <i> SL_PSA_ITS_USER_MAX_FILES is required, ITS should be cleared and
 // <i> all files need to be stored again.
-// <i> Default: 0
-#define SL_PSA_ITS_SUPPORT_V3_DRIVER 0
+// <i> Default: 1
+#define SL_PSA_ITS_SUPPORT_V3_DRIVER 1
+
+// </h>
 
 // <<< end of configuration section >>>
 
 // -----------------------------------------------------------------------------
 // Sub-files
-
-#include "sli_psa_acceleration.h"
 
 #if defined(SLI_PSA_CONFIG_AUTOGEN_OVERRIDE_FILE)
   #include SLI_PSA_CONFIG_AUTOGEN_OVERRIDE_FILE
@@ -97,6 +99,14 @@
   #include "sli_psa_config_autogen.h"
 #endif
 
-#include "sli_psa_omnipresent.h"
+#if defined(TFM_CONFIG_SL_SECURE_LIBRARY)
+  #include "sli_psa_tfm_translation.h"
+#endif
 
-#endif // SLI_PSA_CONFIG_H
+#if SL_MBEDTLS_DRIVERS_ENABLED
+  #include "sli_psa_acceleration.h"
+#endif
+
+#include "sli_psa_builtin_config_autogen.h"
+
+#endif // SL_PSA_CONFIG_H
