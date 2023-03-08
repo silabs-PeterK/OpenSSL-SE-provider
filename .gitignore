@@ -1,0 +1,5 @@
+# Artifact build folders
+artifact/build/
+
+# MacOS
+*.DS_Store
