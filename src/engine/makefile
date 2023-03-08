@@ -2,10 +2,12 @@ CC=gcc
 CFLAGS=-fPIC -g
 LDFLAGS = -shared -g
 
+SDK_PATH ?= $(GSDK_REPO)
+
 OPENSSLDIR=/usr/local/src/openssl-3.0.7/
 ENGINESDIR=/usr/local/ssl/lib/engines-3/
-PSACRYPTOINCDIR=../../artifact/gecko_sdk_4.2.0/util/third_party/mbedtls/include/
-SLDINCIR=../../artifact/gecko_sdk_4.2.0/platform/security/sl_component/sl_psa_driver/inc/
+PSACRYPTOINCDIR=$(SDK_PATH)/util/third_party/mbedtls/include/
+SLDINCIR=$(SDK_PATH)/platform/security/sl_component/sl_psa_driver/inc/
 #sudo gcc test.c -lssl -lcrypto -I
 
 TARGETLIB=libpsaengine.so
@@ -13,7 +15,7 @@ TARGETENGINE=psaengine.so
 SOURCES = \
 	compile.c 
 PSAOBJECTS = \
-	../../artifact/build/debug/primary.a
+	$(SDK_PATH)/platform/security/sl_component/sl_secure_engine_cpc/build/debug/primary_psa_lib.a
 OBJECTS = \
 	libpsaengine.o
 LIBSDIR= \
