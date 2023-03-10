@@ -1,4 +1,5 @@
 #define GCM_IV_DEFAULT_SIZE 12
+#include "thread_safety.h"
 
 static int gcm_tls_init(PSA_CIPHER_CTX *dat, unsigned char *aad, size_t aad_len);
 static int gcm_tls_iv_set_fixed(PSA_CIPHER_CTX *ctx, unsigned char *iv,
@@ -24,9 +25,10 @@ static int psa_prov_set_key(psa_key_id_t key_id, size_t key_length,
   psa_set_key_lifetime(&key_attr, PSA_KEY_LIFETIME_FROM_PERSISTENCE_AND_LOCATION(persistence, PSA_KEY_LOCATION_SL_SE_OPAQUE));
   psa_set_key_id(&key_attr, key_id);
   PSA_CRYPTO_MUTEX_UNLOCK
-  //psa_destroy_key(key_id);
+ // psa_destroy_key(key_id);
 
   TEST_RESULT_TS(psa_import_key(&key_attr, data, key_length / 8, &key_id_local), PSA_SUCCESS, PROV_R_KEY_SETUP_FAILED);
+
   TEST_EQUAL(key_id_local, key_id, PROV_R_KEY_SETUP_FAILED);
   return OPENSSL_SUCCESS;
 }
@@ -246,34 +248,37 @@ int ossl_psa_gcm_set_ctx_params(void *vctx, const OSSL_PARAM params[])
 
   p = OSSL_PARAM_locate_const(params, OSSL_CIPHER_PARAM_AEAD_SET_KEY_ID);
   if (p != NULL) {
-    q = OSSL_PARAM_locate_const(params, OSSL_CIPHER_PARAM_AEAD_SET_KEY);
-    if (q == NULL) {
-      ERR_raise(ERR_LIB_PROV, PROV_R_FAILED_TO_GET_PARAMETER);
-      return 0;
-    }
-    if (p->data == NULL
-        || p->data_type != OSSL_PARAM_uint32
-        || q->data == NULL
-        || q->data_type != OSSL_PARAM_OCTET_STRING) {
+    if (p->data == NULL) {
       ERR_raise(ERR_LIB_PROV, PROV_R_FAILED_TO_GET_PARAMETER);
       return 0;
     }
     uint32_t temp_key = 0;
-    temp_key = *(p->data_type + 3);
+    temp_key = *((uint8_t *)p->data + 3);
     temp_key <<= 8;
-    temp_key |= *(p->data_type + 2);
+    temp_key |= *((uint8_t *)p->data + 2);
     temp_key <<= 8;
-    temp_key |= *(p->data_type + 1);
+    temp_key |= *((uint8_t *)p->data + 1);
     temp_key <<= 8;
-    temp_key |= *(p->data_type);
-    TEST_EQUAL(psa_prov_set_key(temp_key, q->data_size, PSA_KEY_TYPE_AES, PSA_ALG_GCM,
-                                PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT,
-                                (const uint8_t *) q->data, PSA_KEY_PERSISTENCE_DEFAULT),
-               OPENSSL_SUCCESS, PROV_R_FAILED_TO_GET_PARAMETER);
+    temp_key |= *((uint8_t *)p->data);
+
+    q = OSSL_PARAM_locate_const(params, OSSL_CIPHER_PARAM_AEAD_SET_KEY);
+    if (q != NULL) {
+      if (q->data == NULL
+          || q->data_type != OSSL_PARAM_OCTET_STRING) {
+        ERR_raise(ERR_LIB_PROV, PROV_R_FAILED_TO_GET_PARAMETER);
+        return 0;
+      }
+
+      TEST_EQUAL(psa_prov_set_key(temp_key, (q->data_size) * 8, PSA_KEY_TYPE_AES, PSA_ALG_GCM,
+                                  PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT,
+                                  (const uint8_t *) q->data, PSA_KEY_PERSISTENCE_DEFAULT),
+                 OPENSSL_SUCCESS, PROV_R_FAILED_TO_GET_PARAMETER);
+    }
     ctx->key = temp_key;
+    ctx->key_set = 1;
   }
 
-  return 1;
+  return OPENSSL_SUCCESS;
 }
 
 /* Copy from openssl, but with psa ontext */
@@ -434,7 +439,7 @@ static int gcm_cipher_internal(PSA_CIPHER_CTX *ctx, unsigned char *out,
   *padlen = olen;
   return rv;
   err:
-  TEST_RESULT_TS(psa_aead_abort(&ctx->aead_operation), PSA_SUCCESS);
+  TEST_RESULT_TS(psa_aead_abort(&ctx->aead_operation), PSA_SUCCESS, 0);
   *padlen = olen;
   return rv;
 }
@@ -581,7 +586,7 @@ static int gcm_tls_cipher(PSA_CIPHER_CTX *ctx, unsigned char *out, size_t *padle
   *padlen = plen;
   return rv;
   err:
-  TEST_RESULT_TS(psa_aead_abort(&ctx->aead_operation), PSA_SUCCESS);
+  TEST_RESULT_TS(psa_aead_abort(&ctx->aead_operation), PSA_SUCCESS, 0);
   ctx->iv_state = IV_STATE_FINISHED;
   ctx->tls_aad_len = UNINITIALISED_SIZET;
   *padlen = plen;

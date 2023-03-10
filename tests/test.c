@@ -179,7 +179,75 @@ static int do_encrypt(unsigned char *iv_gen, unsigned char *ct, int *ct_len,
   EVP_CIPHER_CTX_free(ctx);
   return ret;
 }
+static int do_encrypt_persistent(unsigned char *iv_gen, unsigned char *ct, int *ct_len,
+                                 unsigned char *tag, int *tag_len)
+{
+  int ret = 0;
+  EVP_CIPHER_CTX *ctx = NULL;
+  int outlen;
+  unsigned char outbuf[64];
+  unsigned int key_id = 3236;
+  psa_destroy_key(key_id);
+  *tag_len = 16;
+  ctx = EVP_CIPHER_CTX_new();
 
+  OSSL_PARAM params[3] = {
+    OSSL_PARAM_END, OSSL_PARAM_END, OSSL_PARAM_END
+  };
+  params[0] = OSSL_PARAM_construct_uint(OSSL_CIPHER_PARAM_AEAD_SET_KEY_ID,
+                                        &key_id);
+  params[1] = OSSL_PARAM_construct_octet_string(OSSL_CIPHER_PARAM_AEAD_SET_KEY,
+                                                gcm_key, sizeof(gcm_key));
+  ret = TEST_true(EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL) > 0)
+        && TEST_true(EVP_CIPHER_CTX_set_params(ctx, params))
+        && TEST_true(EVP_EncryptInit_ex(ctx, NULL, NULL, NULL,
+                                        iv_gen != NULL ? NULL : gcm_iv) > 0)
+        && TEST_true(EVP_EncryptUpdate(ctx, NULL, &outlen, gcm_aad,
+                                       sizeof(gcm_aad)) > 0)
+        && TEST_true(EVP_EncryptUpdate(ctx, ct, ct_len, gcm_pt,
+                                       sizeof(gcm_pt)) > 0)
+        && TEST_true(EVP_EncryptFinal_ex(ctx, outbuf, &outlen) > 0)
+        && TEST_int_eq(EVP_CIPHER_CTX_get_tag_length(ctx), 16)
+        && TEST_true(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, 16, tag) > 0)
+        && TEST_true(iv_gen == NULL
+                     || EVP_CIPHER_CTX_get_original_iv(ctx, iv_gen, 12));
+  EVP_CIPHER_CTX_free(ctx);
+  return ret;
+}
+static int do_decrypt_persistent(const unsigned char *iv, const unsigned char *ct,
+                                 int ct_len, const unsigned char *tag, int tag_len)
+{
+  int ret = 0;
+  EVP_CIPHER_CTX *ctx = NULL;
+  int outlen, ptlen;
+  unsigned char pt[32];
+  unsigned char outbuf[32];
+  unsigned int key_id = 3236;
+  ctx = EVP_CIPHER_CTX_new();
+  OSSL_PARAM params[2] = {
+    OSSL_PARAM_END, OSSL_PARAM_END
+  };
+  params[0] = OSSL_PARAM_construct_uint(OSSL_CIPHER_PARAM_AEAD_SET_KEY_ID,
+                                        &key_id);
+  EVP_CIPHER *cipher = EVP_CIPHER_fetch(NULL, "AES-256-GCM", NULL);
+
+  ret =  TEST_true(EVP_DecryptInit_ex(ctx, cipher, NULL,
+                                      NULL, NULL) > 0)
+        && TEST_true(EVP_CIPHER_CTX_set_params(ctx, params))
+        && TEST_true(EVP_DecryptInit_ex(ctx, NULL, NULL, NULL, iv) > 0)
+        && TEST_int_eq(EVP_CIPHER_CTX_get_tag_length(ctx), 16)
+        && TEST_true(EVP_DecryptUpdate(ctx, NULL, &outlen, gcm_aad,
+                                       sizeof(gcm_aad)) > 0)
+        && TEST_true(EVP_DecryptUpdate(ctx, pt, &ptlen, ct,
+                                       ct_len) > 0)
+        && TEST_true(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG,
+                                         tag_len, (void *)tag) > 0)
+        && TEST_true(EVP_DecryptFinal_ex(ctx, outbuf, &outlen) > 0)
+        && TEST_mem_eq(gcm_pt, sizeof(gcm_pt), pt, ptlen);
+
+  EVP_CIPHER_CTX_free(ctx);
+  return ret;
+}
 static int do_decrypt(const unsigned char *iv, const unsigned char *ct,
                       int ct_len, const unsigned char *tag, int tag_len)
 {
@@ -275,22 +343,6 @@ int test_provider()
   // CIPHER FUNCTIONS
   //.................................................
 
-  psa_key_attributes_t key_attr;
-  psa_key_id_t import_key_id;
-  psa_status_t ret;
-   uint8_t aes_key[32] = {0};
-  key_attr = psa_key_attributes_init();
-  psa_set_key_type(&key_attr, PSA_KEY_TYPE_AES);
-  psa_set_key_bits(&key_attr, 256);
-  psa_set_key_usage_flags(&key_attr, PSA_KEY_USAGE_ENCRYPT | PSA_KEY_USAGE_DECRYPT);
-  psa_set_key_algorithm(&key_attr, PSA_ALG_GCM);
-  psa_set_key_lifetime(&key_attr, PSA_KEY_LIFETIME_FROM_PERSISTENCE_AND_LOCATION(PSA_KEY_PERSISTENCE_VOLATILE, PSA_KEY_LOCATION_SL_SE_OPAQUE));
-  psa_set_key_id(&key_attr, 0x12);
-  ret = psa_destroy_key(0x12);
-  ret = psa_import_key(&key_attr, aes_key, 32, &import_key_id);
-
-  printf("\n%i, %i\n", ret, import_key_id);
-
   unsigned char tag[32];
   unsigned char ct[32];
   int ctlen = 0, taglen = 0;
@@ -300,6 +352,10 @@ int test_provider()
                     && TEST_mem_eq(gcm_tag, sizeof(gcm_tag), tag, taglen)
                     && do_decrypt(gcm_iv, ct, ctlen, tag, taglen)));
 
+  printf("\n%i\n", (do_encrypt_persistent(NULL, ct, &ctlen, tag, &taglen)
+                    && TEST_mem_eq(gcm_ct, sizeof(gcm_ct), ct, ctlen)
+                    && TEST_mem_eq(gcm_tag, sizeof(gcm_tag), tag, taglen)
+                    && do_decrypt_persistent(gcm_iv, ct, ctlen, tag, taglen)));
   OSSL_PROVIDER_unload(prov);
   return OPENSSL_SUCCESS;
 }

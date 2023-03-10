@@ -88,6 +88,9 @@ static void * ossl_psa_gcm_initctx(size_t keybits)
     ctx->ivlen = (EVP_GCM_TLS_FIXED_IV_LEN + EVP_GCM_TLS_EXPLICIT_IV_LEN);
     ctx->keylen = keybits / 8;
     ctx->key = 0;
+    PSA_CRYPTO_MUTEX_LOCK
+    ctx->aead_operation = psa_aead_operation_init();
+    PSA_CRYPTO_MUTEX_UNLOCK
   }
   return (void *)ctx;
 }
@@ -96,7 +99,9 @@ static void cipher_freectx(void *vctx)
 {
   PSA_CIPHER_CTX *ctx = (PSA_CIPHER_CTX *)vctx;
   PSA_CRYPTO_MUTEX_LOCK
-  psa_destroy_key(ctx->key);
+  if (ctx->tls_enc_records) {
+    psa_destroy_key(ctx->key);
+  }
   PSA_CRYPTO_MUTEX_UNLOCK
   OPENSSL_clear_free(ctx, sizeof(*ctx));
 }
@@ -150,11 +155,11 @@ static void *cipher_dupctx(void *ctx)
         if (strncmp(key, "KEY_ID:", 7) == 0) {                                                                                                                              \
           ctx->key = key[10];                                                                                                                                               \
           ctx->key <<= 8;                                                                                                                                                   \
-          ctx->key |= key[9];                                                                                                                                                \
+          ctx->key |= key[9];                                                                                                                                               \
           ctx->key <<= 8;                                                                                                                                                   \
-          ctx->key |= key[8];                                                                                                                                                \
+          ctx->key |= key[8];                                                                                                                                               \
           ctx->key <<= 8;                                                                                                                                                   \
-          ctx->key |= key[7];                                                                                                                                                \
+          ctx->key |= key[7];                                                                                                                                               \
         } else {                                                                                                                                                            \
           ctx->key = get_next_key_id();                                                                                                                                     \
           if (enc) {                                                                                                                                                        \
@@ -167,10 +172,9 @@ static void *cipher_dupctx(void *ctx)
         }                                                                                                                                                                   \
         ctx->key_set = 1;                                                                                                                                                   \
       }                                                                                                                                                                     \
+    }                                                                                                                                                                       \
+    if (ctx->key_set) {                                                                                                                                                     \
       ctx->tls_enc_records = 0;                                                                                                                                             \
-      PSA_CRYPTO_MUTEX_LOCK                                                                                                                                                 \
-      ctx->aead_operation = psa_aead_operation_init();                                                                                                                      \
-      PSA_CRYPTO_MUTEX_UNLOCK                                                                                                                                               \
       if (enc) {                                                                                                                                                            \
         TEST_EQUAL(psa_aead_encrypt_setup(&ctx->aead_operation, ctx->key, alg), PSA_SUCCESS, PROV_R_UNABLE_TO_INITIALISE_CIPHERS);                                          \
         ctx->taglen = PSA_AEAD_TAG_LENGTH(keyType, keySize, alg);                                                                                                           \
