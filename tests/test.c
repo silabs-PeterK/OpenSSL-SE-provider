@@ -19,17 +19,6 @@
 #include <sys/time.h>
 #include "../inc/common.h"
 
-#define T(e)                            \
-  if (!(e)) {                           \
-    printf("Error");                    \
-    OpenSSLDie(__FILE__, __LINE__, #e); \
-  }
-
-#define TEST_ASSERT(e) { if ((test = (e))) {          \
-                           printf("Test FAILED\n"); } \
-                         else {                       \
-                           printf("Test passed\n"); } }
-
 #define TEST_true(a) (a == 1)
 #define TEST_int_eq(a, b) (a == b)
 #define TEST_mem_eq(a, m, b, n) a[m - 1] == b[n - 1] //not proper mem eq.
@@ -40,6 +29,31 @@
   }
 
 struct timeval begin, end;
+
+static const unsigned char gcm_key[] = {
+  0xee, 0xbc, 0x1f, 0x57, 0x48, 0x7f, 0x51, 0x92, 0x1c, 0x04, 0x65, 0x66,
+  0x5f, 0x8a, 0xe6, 0xd1, 0x65, 0x8b, 0xb2, 0x6d, 0xe6, 0xf8, 0xa0, 0x69,
+  0xa3, 0x52, 0x02, 0x93, 0xa5, 0x72, 0x07, 0x8f
+};
+static const unsigned char gcm_iv[] = {
+  0x99, 0xaa, 0x3e, 0x68, 0xed, 0x81, 0x73, 0xa0, 0xee, 0xd0, 0x66, 0x84
+};
+static const unsigned char gcm_pt[] = {
+  0xf5, 0x6e, 0x87, 0x05, 0x5b, 0xc3, 0x2d, 0x0e, 0xeb, 0x31, 0xb2, 0xea,
+  0xcc, 0x2b, 0xf2, 0xa5
+};
+static const unsigned char gcm_aad[] = {
+  0x4d, 0x23, 0xc3, 0xce, 0xc3, 0x34, 0xb4, 0x9b, 0xdb, 0x37, 0x0c, 0x43,
+  0x7f, 0xec, 0x78, 0xde
+};
+static const unsigned char gcm_ct[] = {
+  0xf7, 0x26, 0x44, 0x13, 0xa8, 0x4c, 0x0e, 0x7c, 0xd5, 0x36, 0x86, 0x7e,
+  0xb9, 0xf2, 0x17, 0x36
+};
+static const unsigned char gcm_tag[] = {
+  0x67, 0xba, 0x05, 0x10, 0x26, 0x2a, 0xe4, 0x87, 0xd7, 0x37, 0xee, 0x62,
+  0x98, 0xf7, 0x7e, 0x0c
+};
 
 int test_psa_crypto_hash_single()
 {
@@ -128,30 +142,7 @@ int test_psa_crypto_hash_multi()
   printf("\n");
 }
 
-static const unsigned char gcm_key[] = {
-  0xee, 0xbc, 0x1f, 0x57, 0x48, 0x7f, 0x51, 0x92, 0x1c, 0x04, 0x65, 0x66,
-  0x5f, 0x8a, 0xe6, 0xd1, 0x65, 0x8b, 0xb2, 0x6d, 0xe6, 0xf8, 0xa0, 0x69,
-  0xa3, 0x52, 0x02, 0x93, 0xa5, 0x72, 0x07, 0x8f
-};
-static const unsigned char gcm_iv[] = {
-  0x99, 0xaa, 0x3e, 0x68, 0xed, 0x81, 0x73, 0xa0, 0xee, 0xd0, 0x66, 0x84
-};
-static const unsigned char gcm_pt[] = {
-  0xf5, 0x6e, 0x87, 0x05, 0x5b, 0xc3, 0x2d, 0x0e, 0xeb, 0x31, 0xb2, 0xea,
-  0xcc, 0x2b, 0xf2, 0xa5
-};
-static const unsigned char gcm_aad[] = {
-  0x4d, 0x23, 0xc3, 0xce, 0xc3, 0x34, 0xb4, 0x9b, 0xdb, 0x37, 0x0c, 0x43,
-  0x7f, 0xec, 0x78, 0xde
-};
-static const unsigned char gcm_ct[] = {
-  0xf7, 0x26, 0x44, 0x13, 0xa8, 0x4c, 0x0e, 0x7c, 0xd5, 0x36, 0x86, 0x7e,
-  0xb9, 0xf2, 0x17, 0x36
-};
-static const unsigned char gcm_tag[] = {
-  0x67, 0xba, 0x05, 0x10, 0x26, 0x2a, 0xe4, 0x87, 0xd7, 0x37, 0xee, 0x62,
-  0x98, 0xf7, 0x7e, 0x0c
-};
+
 
 static int do_encrypt(unsigned char *iv_gen, unsigned char *ct, int *ct_len,
                       unsigned char *tag, int *tag_len)
@@ -360,107 +351,11 @@ int test_provider()
   return OPENSSL_SUCCESS;
 }
 
-int test_engine()
-{
-  ENGINE_load_dynamic();
-
-  ENGINE *eng = ENGINE_by_id("psaengine");
-
-  if ( eng == NULL ) {
-    printf("Could not Load Engine!\n");
-    exit(1);
-  }
-
-  T(ENGINE_init(eng));
-
-  printf("Engine name: %s \n", ENGINE_get_name(eng));
-  if (!ENGINE_set_default_ciphers(eng)) {
-    abort();
-  }
-
-  int ret = OPENSSL_FAILURE;
-
-  EVP_CIPHER *ciph;
-  ciph = (EVP_CIPHER *)EVP_get_cipherbynid(NID_aes_128_cbc);
-  TEST_NOT_NULL(ciph)
-
-  unsigned char pt[16];
-  for (int i = 0; i < 16; i++) {
-    pt[i] = 'p';
-  }
-
-  unsigned char ct[32];
-
-  // Key to use for encrpytion and decryption
-  unsigned char key[32];
-  for (int i = 0; i < 32; i++) {
-    key[i] = 'k';
-  }
-
-  // Initialization Vector
-  unsigned char iv[16];
-  for (int i = 0; i < 16; i++) {
-    iv[i] = 'i';
-  }
-
-  OSSL_PARAM params[] = { OSSL_PARAM_END, OSSL_PARAM_END };
-
-  int outlen;
-  EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
-  OPENSSL_assert(ctx);
-  T(EVP_CIPHER_iv_length(ciph) == sizeof(iv));
-  T(EVP_CIPHER_block_size(ciph) == 16);
-
-  T(EVP_CipherInit(ctx, ciph, NULL, NULL, 0));
-
-  T(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_SET_KEY_ID, 5, NULL));
-  T(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_IMPORT_KEY, 16, key));
-  printf("\n");
-  for (int i = 0; i < 32; i++) {
-    printf("%i ", key[i]);
-  }
-  printf("\n");
-  T(EVP_CipherInit_ex(ctx, ciph, NULL, NULL, iv, 1));
-  key[0] = 63;
-  T(EVP_CipherUpdate(ctx, ct, &outlen, pt, 16));
-  T(EVP_CipherFinal(ctx, ct + 16, &outlen));
-  T(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_EXPORT_KEY, 16, key));
-  printf("\n");
-  for (int i = 0; i < 32; i++) {
-    printf("%i ", key[i]);
-  }
-  printf("\n");
-
-  T(EVP_CipherInit_ex(ctx, ciph, NULL, NULL, iv, 0));
-  T(EVP_CipherUpdate(ctx, pt, &outlen, ct, 16));
-  T(EVP_CipherFinal(ctx, pt, &outlen));
-  printf("\n");
-  for (int i = 0; i < 16; i++) {
-    printf("%c", pt[i]);
-  }
-  printf("\n");
-  EVP_CIPHER_CTX_free(ctx);
-  EVP_CIPHER_free(ciph);
-
-  if (ret) {
-    printf("Some tests FAILED!\n");
-  } else {
-    printf("All tests passed!\n");
-  }
-
-  ENGINE_finish(eng);
-  ENGINE_free(eng);
-  return ret;
-}
-
 int main(void)
 {
   if (test_provider() != OPENSSL_SUCCESS) {
     printf("Provider test failure");
   }
-  // if (test_engine() != OPENSSL_SUCCESS) {
-  //  printf("Engine test failure");
-  //}
 
   exit(EXIT_SUCCESS);
 }

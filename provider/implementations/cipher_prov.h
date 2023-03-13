@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2021 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2023 Silicon Labs. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -23,7 +23,7 @@
 #include "prov/ciphercommon_aead.h"
 #include "prov/implementations.h"
 
-#include "common.h"
+#include "../common.h"
 #include "thread_safety.h"
 
 #define AES_BLOCK_SIZE 128
@@ -226,12 +226,3 @@ static void *cipher_dupctx(void *ctx)
 IMPLEMENT_cipher_operation(aes, 256, gcm, GCM, PSA_ALG_GCM, PSA_KEY_TYPE_AES)
 IMPLEMENT_cipher_operation(aes, 192, gcm, GCM, PSA_ALG_GCM, PSA_KEY_TYPE_AES)
 IMPLEMENT_cipher_operation(aes, 128, gcm, GCM, PSA_ALG_GCM, PSA_KEY_TYPE_AES)
-//IMPLEMENT_cipher_operation(aes, 256, ccm, PSA_ALG_CCM, PSA_KEY_TYPE_AES)
-/*
-   ossl_aes256gcm_functions),
-   ossl_aes192gcm_functions),
-   ossl_aes128gcm_functions),
-   ossl_aes256ccm_functions),
-   ossl_aes192ccm_functions),
-   ossl_aes128ccm_functions),
- */

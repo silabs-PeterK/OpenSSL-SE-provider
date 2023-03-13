@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2021 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2023 Silicon Labs. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -20,10 +20,8 @@
 #include "prov/digestcommon.h"
 #include "prov/implementations.h"
 
-#include "common.h"
+#include "../common.h"
 #include "thread_safety.h"
-
-extern  pthread_mutex_t psa_crypto_mutex;
 
 typedef struct {
   psa_hash_operation_t operation;

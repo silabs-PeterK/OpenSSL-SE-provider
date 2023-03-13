@@ -2,20 +2,16 @@ CC=gcc
 CFLAGS=-fPIC -g
 LDFLAGS = -shared
 
-#sudo gcc test.c -lssl -lcrypto -I
-
 SDK_PATH ?= $(GSDK_REPO)
-OPENSSLDIR= /usr/local/src/openssl-3.0.7
-#OPENSSLDIR= /home/peter/openssl-3.0.8
-LIBSDIR= /usr/lib/
-PROVIDERSDIR=/usr/local/ssl/lib/ossl-modules/
+OPENSSLDIR ?= $(OPENSSL_DIR)
+LIBSDIR ?= $(LIBS_DIR)
+PROVIDERSDIR ?= $(PROVIDERS_DIR)
 
 INCLUDES += \
-  -I ../../inc/ \
   -I $(SDK_PATH)/platform/security/sl_component/sl_psa_driver/inc/ \
   -I $(SDK_PATH)/util/third_party/mbedtls/include/ \
   -I $(SDK_PATH)/platform/common/inc/ \
-  -I usr/local/ssl/lib/ossl-modules/ \
+  -I $(PROVIDERSDIR) \
   -I $(OPENSSLDIR)/include/ \
   -I $(OPENSSLDIR)/providers/common/include/ \
   -I $(OPENSSLDIR)/providers/implementations/include/ \
@@ -23,7 +19,7 @@ INCLUDES += \
   -I $(SDK_PATH)/platform/security/sl_component/sl_cpc_secure_engine/primary/inc \
   -I $(SDK_PATH)/platform/security/sl_component/se_manager/inc \
   -I $(SDK_PATH)/platform/emlib/inc \
-  -I $(SDK_PATH)/platform/emlib/host/inc 
+  -I $(SDK_PATH)/platform/emlib/host/inc \
 
 LIBS += \
   $(SDK_PATH)/platform/security/sl_component/sl_secure_engine_cpc/build/debug/primary_psa_lib.a \

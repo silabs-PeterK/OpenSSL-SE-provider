@@ -36,7 +36,7 @@
 #include <pthread.h>
 
 // set this to 1 for more runtime log messages
-#define DEBUG (1) //TODO disable
+#define DEBUG (0) 
 #define RETRY_COUNT (20u)
 
 // TODO: this shall be moved to provider context.
@@ -131,12 +131,6 @@ static int psa_get_params(void *provctx, OSSL_PARAM params[])
   return OPENSSL_SUCCESS;
 }
 
-static const OSSL_ALGORITHM psa_keymng[] = {
-  //    ALG(PROV_NAMES_SHA2_256, ossl_sha256_functions),
-  //    ALG(PROV_NAMES_SHA2_384, ossl_sha384_functions),
-  //    ALG(PROV_NAMES_SHA2_512, ossl_sha512_functions),
-  { NULL, NULL, NULL }
-};
 static const OSSL_ALGORITHM psa_ciphers[] = {
   ALG(PROV_NAMES_AES_256_GCM, ossl_aes256gcm_functions),
   ALG(PROV_NAMES_AES_192_GCM, ossl_aes192gcm_functions),
@@ -161,8 +155,6 @@ static const OSSL_ALGORITHM *psa_query(void *provctx, int operation_id,
 {
   *no_cache = 0;
   switch (operation_id) {
-    // case OSSL_OP_KEYMGMT:
-    //  return psa_keymng;
     case OSSL_OP_DIGEST:
       return psa_digests;
     case OSSL_OP_CIPHER:
@@ -179,7 +171,6 @@ static const OSSL_ALGORITHM *psa_query(void *provctx, int operation_id,
  */
 /* Functions we provide to the core */
 static const OSSL_DISPATCH psa_dispatch_table[] = {
-  //  { OSSL_FUNC_PROVIDER_TEARDOWN, (void (*)(void))psa_teardown },
   { OSSL_FUNC_PROVIDER_GETTABLE_PARAMS, (void (*)(void))psa_gettable_params },
   { OSSL_FUNC_PROVIDER_GET_PARAMS, (void (*)(void))psa_get_params },
   { OSSL_FUNC_PROVIDER_QUERY_OPERATION, (void (*)(void))psa_query },
@@ -191,20 +182,6 @@ OPENSSL_EXPORT int OSSL_provider_init(const OSSL_CORE_HANDLE *handle,
                                       const OSSL_DISPATCH **out,
                                       void **provctx)
 {
-  // OSSL_LIB_CTX *libctx = NULL;
-
-/*
-    if ((*provctx = ossl_prov_ctx_new()) == NULL
- || (libctx = OSSL_LIB_CTX_new_child(handle, in)) == NULL) {
-        OSSL_LIB_CTX_free(libctx);
-        psa_teardown(*provctx);
- * provctx = NULL;
-        return 0;
-    }
-    ossl_prov_ctx_set0_libctx(*provctx, libctx);
-    ossl_prov_ctx_set0_handle(*provctx, handle);
- */
-
   call_cpc_init();
   psa_status_t status = psa_crypto_init();
   *provctx = (void *)handle;
