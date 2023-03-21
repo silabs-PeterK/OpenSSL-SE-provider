@@ -2,7 +2,7 @@
 
 1.) Install cpc deamon
 
-2.) Flash and run the app on the board
+2.) Flash and run the app on the board (secondary)
 
 3.) Iinstall OpenSSL 3.0
 
